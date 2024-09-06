@@ -22,9 +22,19 @@ class Task(nn.Module):
         self.t_q = nn.Parameter(torch.randn(hidden_dim, input_dim))
 
     def loss(self, f, x: Tensor) -> Tensor:
+        assert x.requires_grad, "Input tensor 'x' does not require gradients"
         train_view = self.t_k @ x.t()
         label_view = self.t_v @ x.t()
-        return nn.functional.mse_loss(f(train_view.t()), label_view.t())
+
+        # Ensure train_view and label_view require gradients
+        train_view = train_view.requires_grad_(True)
+        label_view = label_view.requires_grad_(True)
+
+        # Calculate the loss
+        loss = nn.functional.mse_loss(f(train_view.t()), label_view.t())
+        # Ensure the loss requires gradients
+        # assert loss.requires_grad, "Loss does not require gradients in Task.loss"
+        return loss
 
 class Recon(nn.Module):
     def __init__(self, hidden_dim: int):
@@ -43,23 +53,31 @@ class Learner:
         self.task = task
         self.model = Recon(hidden_dim)
         self.lr = lr
-        
+
         # Ensure all parameters have requires_grad=True
         for param in self.model.parameters():
             param.requires_grad = True
 
     def train(self, x: Tensor):
         self.model.to(x.device)
+        self.model.train()
+        x.requires_grad_()
+        assert x.requires_grad, "Input tensor 'x' does not require gradients, but it should."
+
         # Temporarily enable gradients, even if we're in a no_grad context
-        with torch.enable_grad():
+        with torch.set_grad_enabled(True):
             loss = self.task.loss(self.model, x)
+            loss.requires_grad_()
+            assert loss.requires_grad, "Loss does not have a valid grad_fn, gradients will not be computed."
             grad_fn = torch.autograd.grad(
-                loss, self.model.parameters(), create_graph=True
+                loss, self.model.parameters(), create_graph=True, allow_unused=True
             )
         
         # Update parameters manually
         with torch.no_grad():
             for param, grad in zip(self.model.parameters(), grad_fn):
+                if grad is None:
+                    continue
                 param.sub_(self.lr * grad)
 
     def predict(self, x: Tensor) -> Tensor:
