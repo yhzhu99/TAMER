@@ -15,48 +15,16 @@ class Task(nn.Module):
         super(Task, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
+
+        # Theta
         self.t_k = nn.Parameter(torch.randn(hidden_dim, input_dim))
         self.t_v = nn.Parameter(torch.randn(hidden_dim, input_dim))
         self.t_q = nn.Parameter(torch.randn(hidden_dim, input_dim))
 
     def loss(self, f, x: Tensor) -> Tensor:
-        train_view = self.t_k.to(x.device) @ x.t()
-        label_view = self.t_v.to(x.device) @ x.t()
+        train_view = self.t_k @ x.t()
+        label_view = self.t_v @ x.t()
         return nn.functional.mse_loss(f(train_view.t()), label_view.t())
-
-class OGD(nn.Module):
-    def __init__(self, lr: float = 0.0001):
-        super(OGD, self).__init__()
-        self.lr = lr
-
-    def step(self, model: nn.Module, grads: List[Tensor]):
-        with torch.no_grad():
-            for param, grad in zip(model.parameters(), grads):
-                if grad is not None:
-                    param -= self.lr * grad
-
-class CustomGradientFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, input_tensor, model, task):
-        ctx.save_for_backward(input_tensor)
-        ctx.model = model
-        ctx.task = task
-        with torch.no_grad():
-            loss = task.loss(model, input_tensor)
-        return loss
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        input_tensor, = ctx.saved_tensors
-        model = ctx.model
-        task = ctx.task
-        
-        with torch.enable_grad():
-            input_tensor = input_tensor.detach().requires_grad_()
-            loss = task.loss(model, input_tensor)
-            grad = torch.autograd.grad(loss, model.parameters(), create_graph=True)
-        
-        return (None, *grad, None)
 
 class Recon(nn.Module):
     def __init__(self, hidden_dim: int):
@@ -71,37 +39,32 @@ class Recon(nn.Module):
         return x + self.mlp(x)  # Residual connection
 
 class Learner:
-    def __init__(self, task: Task, hidden_dim: int):
+    def __init__(self, task: Task, hidden_dim: int, lr: float = 0.001):
         self.task = task
         self.model = Recon(hidden_dim)
-        self.optim = OGD()
+        self.lr = lr
+        
+        # Ensure all parameters have requires_grad=True
+        for param in self.model.parameters():
+            param.requires_grad = True
 
     def train(self, x: Tensor):
         self.model.to(x.device)
-        self.model.train()
-        x = x.detach()
-
-        # Compute loss and gradients using custom autograd function
-        loss = CustomGradientFunction.apply(x, self.model, self.task)
+        # Temporarily enable gradients, even if we're in a no_grad context
+        with torch.enable_grad():
+            loss = self.task.loss(self.model, x)
+            grad_fn = torch.autograd.grad(
+                loss, self.model.parameters(), create_graph=True
+            )
         
-        # Get gradients
-        grads = [p.grad for p in self.model.parameters()]
-
-        # Perform optimization step
+        # Update parameters manually to bypass no_grad restrictions
         with torch.no_grad():
-            import ipdb; ipdb.set_trace()
-            self.optim.step(self.model, grads)
-        
-        # Zero gradients for next iteration
-        self.model.zero_grad()
-
-        return loss.item()
+            for param, grad in zip(self.model.parameters(), grad_fn):
+                param.sub_(self.lr * grad)
 
     def predict(self, x: Tensor) -> Tensor:
-        self.model.eval()
-        with torch.no_grad():
-            view = self.task.t_q.to(x.device) @ x.t()
-            return self.model(view.t())
+        view = self.task.t_q @ x.t()
+        return self.model(view.t())
 
 class TTLinear(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int):
@@ -111,11 +74,10 @@ class TTLinear(nn.Module):
         self.task = Task(input_dim, hidden_dim)
         self.learner = Learner(self.task, hidden_dim)
 
-    def forward(self, in_seq: Tensor) -> Tensor:
+    def forward(self, in_seq: List[Tensor]) -> List[Tensor]:
         out_seq = []
         for tok in in_seq:
-            tok = tok.requires_grad_(True)  # Ensure the input tensor requires gradients
-            self.learner.train(tok)  # Training step with gradients enabled
+            self.learner.train(tok)
             hidden = self.learner.predict(tok)
             out_seq.append(hidden)
         return torch.stack(out_seq)
