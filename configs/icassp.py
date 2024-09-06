@@ -1,0 +1,58 @@
+hparams = [
+    # {
+    #     'model': 'T3MOE',
+    #     'dataset': 'challenge2012',
+    #     'task': 'outcome',
+    #     'epochs': 50,
+    #     'patience': 10,
+    #     'batch_size': 1024,
+    #     'learning_rate': 0.001,
+    #     'main_metric': 'auprc',
+    #     'demo_dim': 5,
+    #     'lab_dim': 35,
+    #     'hidden_dim': 128,
+    #     'output_dim': 1
+    # },
+    # {
+    #     'model': 'T3MOE',
+    #     'dataset': 'eICU',
+    #     'task': 'outcome',
+    #     'epochs': 50,
+    #     'patience': 10,
+    #     'batch_size': 1024,
+    #     'learning_rate': 0.001,
+    #     'main_metric': 'auprc',
+    #     'demo_dim': 2,
+    #     'lab_dim': 12,
+    #     'hidden_dim': 128,
+    #     'output_dim': 1
+    # },
+    # {
+    #     'model': 'T3MOE',
+    #     'dataset': 'mimic-iii',
+    #     'task': 'outcome',
+    #     'epochs': 50,
+    #     'patience': 10,
+    #     'batch_size': 1024,
+    #     'learning_rate': 0.001,
+    #     'main_metric': 'auprc',
+    #     'demo_dim': 2,
+    #     'lab_dim': 59,
+    #     'hidden_dim': 128,
+    #     'output_dim': 1
+    # },
+    {
+        'model': 'T3MOE',
+        'dataset': 'mimic-iv',
+        'task': 'outcome',
+        'epochs': 100,
+        'patience': 10,
+        'batch_size': 1024,
+        'learning_rate': 0.001,
+        'main_metric': 'auprc',
+        'demo_dim': 2,
+        'lab_dim': 59,
+        'hidden_dim': 128,
+        'output_dim': 1
+    },
+]
