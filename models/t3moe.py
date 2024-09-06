@@ -57,7 +57,7 @@ class Learner:
                 loss, self.model.parameters(), create_graph=True
             )
         
-        # Update parameters manually to bypass no_grad restrictions
+        # Update parameters manually
         with torch.no_grad():
             for param, grad in zip(self.model.parameters(), grad_fn):
                 param.sub_(self.lr * grad)
@@ -74,7 +74,7 @@ class TTLinear(nn.Module):
         self.task = Task(input_dim, hidden_dim)
         self.learner = Learner(self.task, hidden_dim)
 
-    def forward(self, in_seq: List[Tensor]) -> List[Tensor]:
+    def forward(self, in_seq: List[Tensor]) -> Tensor:
         out_seq = []
         for tok in in_seq:
             self.learner.train(tok)
