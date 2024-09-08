@@ -4,6 +4,7 @@ import torch
 from torch.nn import Module
 import torch.nn.functional as F
 from torch import nn, einsum, Tensor
+import torch.optim as optim
 
 from typing import List
 
@@ -44,25 +45,36 @@ class Recon(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim//4, hidden_dim)
         )
-    
     def forward(self, x):
         return x + self.mlp(x)  # Residual connection
 
 class Learner:
-    def __init__(self, task: Task, hidden_dim: int, lr: float = 0.001):
+    def __init__(self, task: Task, hidden_dim: int, lr: float = 1e-5, momentum: float = 0.8, weight_decay: float = 1e-8):
         self.task = task
         self.model = Recon(hidden_dim)
         self.lr = lr
-
+        self.momentum = momentum
+        self.weight_decay = weight_decay
+        
+        # Initialize momentum buffers and adaptive learning rates
+        self.velocity = {}
+        self.adaptive_lr = {}
+        
         # Ensure all parameters have requires_grad=True
-        for param in self.model.parameters():
+        for name, param in self.model.named_parameters():
             param.requires_grad = True
+            self.velocity[name] = torch.zeros_like(param)
+            self.adaptive_lr[name] = lr
 
     def train(self, x: Tensor):
         self.model.to(x.device)
         self.model.train()
         x.requires_grad_()
         assert x.requires_grad, "Input tensor 'x' does not require gradients, but it should."
+
+        # Move velocity buffers to the same device as the model
+        for name, v in self.velocity.items():
+            self.velocity[name] = v.to(x.device)
 
         # Temporarily enable gradients, even if we're in a no_grad context
         with torch.set_grad_enabled(True):
@@ -73,12 +85,27 @@ class Learner:
                 loss, self.model.parameters(), create_graph=True, allow_unused=True
             )
         
-        # Update parameters manually
+        # Update parameters using improved optimization technique
         with torch.no_grad():
-            for param, grad in zip(self.model.parameters(), grad_fn):
+            for (name, param), grad in zip(self.model.named_parameters(), grad_fn):
                 if grad is None:
                     continue
-                param.sub_(self.lr * grad)
+                
+                # Apply weight decay
+                grad = grad + self.weight_decay * param
+                
+                # Update momentum
+                self.velocity[name] = self.momentum * self.velocity[name] + (1 - self.momentum) * grad
+                
+                # Adaptive learning rate (simplified RMSprop)
+                self.adaptive_lr[name] = self.adaptive_lr[name] * 0.9 + 0.1 * (grad ** 2)
+                
+                # Update parameters
+                update = self.lr * self.velocity[name] / (torch.sqrt(self.adaptive_lr[name]) + 1e-8)
+                param.sub_(update)
+        
+        # Apply gradient clipping
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
     def predict(self, x: Tensor) -> Tensor:
         view = self.task.t_q @ x.t()
@@ -205,6 +232,8 @@ class T3MOELayer(Module):
             TTLinear(input_dim=dim, hidden_dim=dim) for _ in range(num_experts)
         ])
 
+        self.ttt = TTLinear(input_dim=dim, hidden_dim=dim)
+
     def forward(self, x, mask = None):
         """
         einstein notation
@@ -283,10 +312,14 @@ class T3MOELayer(Module):
 
         # route the slots per expert to each expert
 
+        x = self.ttt(x)
+
         out = []
         for slots_per_expert, expert, ttt_layer in zip(slots, self.experts, self.ttt_layers):
-            tmp = expert(slots_per_expert)  # Apply feedforward expert
-            tmp = ttt_layer(tmp)  # Apply TTLinear layer
+            # tmp = expert(slots_per_expert)  # Apply feedforward expert
+            # tmp = ttt_layer(tmp)  # Apply TTLinear layer
+            # slots_per_expert = ttt_layer(slots_per_expert)
+            tmp = expert(slots_per_expert)
             out.append(tmp)
 
         out = torch.stack(out)
@@ -356,10 +389,10 @@ class T3MOE(nn.Module):
         self.act = act_layer()
         self.dropout = nn.Dropout(drop)
     def forward(self, x, static, mask, **kwargs):
-        # x = concatenate_inputs(x, static)
-        # x = self.gru(x)[1]
-        x = self.mcgru_layer(x, static).unsqueeze(dim=0)
-        out = self.t3moe_layer(x) + x
-        out = self.act(out)
-        out = self.dropout(out)
-        return out.squeeze(dim=0)
+        x = concatenate_inputs(x, static)
+        x = self.gru(x)[1] # backbone
+        # x = self.mcgru_layer(x, static).unsqueeze(dim=0)
+        x = self.t3moe_layer(x) + x
+        # x = self.act(x)
+        x = self.dropout(x)
+        return x.squeeze(dim=0)

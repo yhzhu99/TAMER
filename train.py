@@ -50,8 +50,8 @@ def run_dl_experiment(config):
 
     # train/val/test
     pipeline = DlPipeline(config)
-    trainer = L.Trainer(accelerator="gpu", devices=[1], max_epochs=config["epochs"], logger=logger, callbacks=[early_stopping_callback, checkpoint_callback], num_sanity_val_steps=0)
-    # trainer = L.Trainer(accelerator="gpu", devices=[1], max_epochs=1, logger=logger, callbacks=[early_stopping_callback, checkpoint_callback], num_sanity_val_steps=0)
+    trainer = L.Trainer(accelerator="gpu", devices=[0], max_epochs=config["epochs"], logger=logger, callbacks=[early_stopping_callback, checkpoint_callback], num_sanity_val_steps=0)
+    # trainer = L.Trainer(accelerator="gpu", devices=[0], max_epochs=1, logger=logger, callbacks=[early_stopping_callback, checkpoint_callback], num_sanity_val_steps=0)
     trainer.fit(pipeline, dm)
     perf = pipeline.cur_best_performance
     return perf
