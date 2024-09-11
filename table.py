@@ -13,7 +13,7 @@ from utils.bootstrap import run_bootstrap
 if __name__ == "__main__":
     best_hparams = hparams
     performance_table = {'dataset':[], 'task': [], 'model': [], 'fold': [], 'seed': [], 'accuracy': [], 'auroc': [], 'auprc': [], 'f1': [], 'minpse': []}
-    for i in range(0, 3):
+    for i in range(0, len(best_hparams)):
         print("#########p##################################")
         print("############      [START]         ############")
         print("###########################################")
