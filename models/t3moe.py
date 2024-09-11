@@ -49,7 +49,7 @@ class Recon(nn.Module):
         return x + self.mlp(x)  # Residual connection
 
 class Learner:
-    def __init__(self, task: Task, hidden_dim: int, lr: float = 1e-5, momentum: float = 0.8, weight_decay: float = 1e-8):
+    def __init__(self, task: Task, hidden_dim: int, lr: float = 1e-5, momentum: float = 0.9, weight_decay: float = 1e-8):
         self.task = task
         self.model = Recon(hidden_dim)
         self.lr = lr
@@ -228,12 +228,6 @@ class T3MOELayer(Module):
             expert_klass(dim = dim, mult = expert_mult, dropout = dropout) for _ in range(num_experts)
         ])
 
-        self.ttt_layers = nn.ModuleList([
-            TTLinear(input_dim=dim, hidden_dim=dim) for _ in range(num_experts)
-        ])
-
-        self.ttt = TTLinear(input_dim=dim, hidden_dim=dim)
-
     def forward(self, x, mask = None):
         """
         einstein notation
@@ -312,19 +306,16 @@ class T3MOELayer(Module):
 
         # route the slots per expert to each expert
 
-        x = self.ttt(x)
-
         out = []
-        for slots_per_expert, expert, ttt_layer in zip(slots, self.experts, self.ttt_layers):
-            # tmp = expert(slots_per_expert)  # Apply feedforward expert
-            # tmp = ttt_layer(tmp)  # Apply TTLinear layer
-            # slots_per_expert = ttt_layer(slots_per_expert)
+        for slots_per_expert, expert in zip(slots, self.experts):
             tmp = expert(slots_per_expert)
             out.append(tmp)
 
         out = torch.stack(out)
 
         # combine back out
+
+        # import ipdb; ipdb.set_trace()
 
         out = rearrange(out, 'e b s d -> b (e s) d')
         out = einsum('b s d, b n s -> b n d', out, combine_weights)
@@ -380,7 +371,7 @@ def concatenate_inputs(x, static):
     return concatenated
 
 class T3MOE(nn.Module):
-    def __init__(self, lab_dim, demo_dim, hidden_dim: int=32, act_layer=nn.GELU, drop=0.1, **kwargs):
+    def __init__(self, lab_dim, demo_dim, hidden_dim: int=32, act_layer=nn.GELU, drop=0.5, **kwargs):
         super().__init__()
         # self.hidden_dim = hidden_dim
         self.mcgru_layer = MCGRU(lab_dim=lab_dim, demo_dim=demo_dim, hidden_dim=hidden_dim)
@@ -388,11 +379,16 @@ class T3MOE(nn.Module):
         self.t3moe_layer = T3MOELayer(dim=hidden_dim, num_experts=16)
         self.act = act_layer()
         self.dropout = nn.Dropout(drop)
+        
+        self.ttt = TTLinear(input_dim=hidden_dim, hidden_dim=hidden_dim)
     def forward(self, x, static, mask, **kwargs):
         x = concatenate_inputs(x, static)
         x = self.gru(x)[1] # backbone
         # x = self.mcgru_layer(x, static).unsqueeze(dim=0)
+
+        x = self.ttt(x) + x
         x = self.t3moe_layer(x) + x
-        # x = self.act(x)
+
+        x = self.act(x)
         x = self.dropout(x)
         return x.squeeze(dim=0)
