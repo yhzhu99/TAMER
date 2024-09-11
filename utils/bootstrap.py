@@ -3,7 +3,7 @@ import pandas as pd
 
 from utils.binary_cls_metrics import get_binary_metrics, get_all_metrics, check_metric_is_better
 
-def bootstrap(preds_outcome, labels_outcome, K=10, N=1000, seed=42):
+def bootstrap(preds, labels, K=100, N=1000, seed=42):
     """Bootstrap resampling for binary classification metrics. Resample K times, each time sampling N pairs."""
     
     np.random.seed(seed)
@@ -14,23 +14,23 @@ def bootstrap(preds_outcome, labels_outcome, K=10, N=1000, seed=42):
     # Create K bootstrap samples, each consisting of N pairs
     for _ in range(K):
         # Sample with replacement from the indices, but now only N indices
-        sample_indices = np.random.choice(len(preds_outcome), N, replace=True)
+        sample_indices = np.random.choice(len(preds), len(preds), replace=True)
 
         # Use the sampled indices to get the bootstrap sample of preds and labels
-        sample_preds_outcome = preds_outcome[sample_indices]
-        sample_labels_outcome = labels_outcome[sample_indices]
+        sample_preds = preds[sample_indices]
+        sample_labels = labels[sample_indices]
         
         # Store the bootstrap samples
-        bootstrapped_samples.append((sample_preds_outcome, sample_labels_outcome))
+        bootstrapped_samples.append((sample_preds, sample_labels))
 
     return bootstrapped_samples
 
 
 def export_metrics(bootstrapped_samples):
-    metrics = {"outcome_accuracy": [], "outcome_auroc": [], "outcome_auprc": [], "outcome_f1": [], "outcome_minpse": []}
+    metrics = {"accuracy": [], "auroc": [], "auprc": [], "f1": [], "minpse": []}
     for sample in bootstrapped_samples:
-        sample_preds_outcome, sample_labels_outcome = sample[0], sample[1]
-        res = get_all_metrics(sample_preds_outcome, sample_labels_outcome)
+        sample_preds, sample_labels = sample[0], sample[1]
+        res = get_binary_metrics(sample_preds, sample_labels)
 
         for k, v in res.items():
             metrics[k].append(v)
@@ -44,8 +44,8 @@ def export_metrics(bootstrapped_samples):
         metrics[k] = {"mean": np.mean(v), "std": np.std(v)}
     return metrics
 
-def run_bootstrap(preds_outcome, labels_outcome):
-    bootstrap_samples = bootstrap(preds_outcome, labels_outcome)
+def run_bootstrap(preds, labels):
+    bootstrap_samples = bootstrap(preds, labels)
     metrics = export_metrics(bootstrap_samples)
     return metrics
 
