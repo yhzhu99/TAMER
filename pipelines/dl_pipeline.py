@@ -78,15 +78,15 @@ class DlPipeline(L.LightningModule):
             y_hat, embedding = self(x, lens)
             y_hat, y = unpad_y(y_hat, y, lens)
             loss = get_loss(y_hat, y, self.task, self.time_aware)
-        return loss, y, y_hat
+        return loss, y, y_hat, embedding
     def training_step(self, batch, batch_idx):
         x, y, lens, pid = batch
-        loss, y, y_hat = self._get_loss(x, y, lens)
+        loss, y, y_hat, _ = self._get_loss(x, y, lens)
         self.log("train_loss", loss)
         return loss
     def validation_step(self, batch, batch_idx):
         x, y, lens, pid = batch
-        loss, y, y_hat = self._get_loss(x, y, lens)
+        loss, y, y_hat, _ = self._get_loss(x, y, lens)
         self.log("val_loss", loss)
         outs = {'y_pred': y_hat, 'y_true': y, 'val_loss': loss}
         self.validation_step_outputs.append(outs)
@@ -107,16 +107,39 @@ class DlPipeline(L.LightningModule):
 
     def test_step(self, batch, batch_idx):
         x, y, lens, pid = batch
-        loss, y, y_hat = self._get_loss(x, y, lens)
-        outs = {'y_pred': y_hat, 'y_true': y, 'lens': lens}
+        loss, y, y_hat, embedding = self._get_loss(x, y, lens)
+        # print("*"*50, embedding.shape)
+        outs = {'y_pred': y_hat, 'y_true': y, 'lens': lens, 'embeddings': embedding}
         self.test_step_outputs.append(outs)
         return loss
+    
     def on_test_epoch_end(self):
-        y_pred = torch.cat([x['y_pred'] for x in self.test_step_outputs]).detach().cpu()
-        y_true = torch.cat([x['y_true'] for x in self.test_step_outputs]).detach().cpu()
-        lens = torch.cat([x['lens'] for x in self.test_step_outputs]).detach().cpu()
+        # Initialize lists to collect tensors
+        y_pred_list = []
+        y_true_list = []
+        lens_list = []
+        embeddings_list = []
+
+        # Collect tensors from all batches
+        for x in self.test_step_outputs:
+            y_pred_list.append(x['y_pred'])
+            y_true_list.append(x['y_true'])
+            lens_list.append(x['lens'])
+            embeddings_list.append(x['embeddings'])
+
+        # Concatenate all tensors
+        y_pred = torch.cat(y_pred_list, dim=0).detach().cpu()
+        y_true = torch.cat(y_true_list, dim=0).detach().cpu()
+        lens = torch.cat(lens_list, dim=0).detach().cpu()
+        embeddings = torch.cat(embeddings_list, dim=0).detach().cpu()
+
         self.test_performance = get_all_metrics(y_pred, y_true, self.task, self.los_info)
-        self.test_outputs = {'preds': y_pred, 'labels': y_true, 'lens': lens}
+        self.test_outputs = {
+            'preds': y_pred,
+            'labels': y_true,
+            'lens': lens,
+            'embeddings': embeddings,
+        }
         self.test_step_outputs.clear()
         return self.test_performance
 
